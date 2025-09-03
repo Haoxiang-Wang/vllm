@@ -908,24 +908,41 @@ class OpenAIServing:
             )
 
         # Append thinking tag for RoboBrain models when enable_thinking is True
-        # Check if we're using robobrain parser by checking if serving_chat has it
-        if (hasattr(request, 'metadata') and request.metadata and 
-            request.metadata.get('enable_thinking', False)):
-            # RoboBrain models need <think> appended to trigger reasoning
-            # This is a simple approach that works for RoboBrain models
-            # TODO: Make this more general or move to parser itself
-            if isinstance(request_prompt, str):
-                # Check if model name contains robobrain (case-insensitive)
-                model_name = getattr(request, 'model', '').lower()
-                if 'robobrain' in model_name:
-                    # Remove trailing newline if present (from chat template)
-                    # RoboBrain chat template ends with "<|im_start|>assistant\n"
-                    # We need "<|im_start|>assistant<think>" (no newline)
-                    if request_prompt.endswith('\n'):
-                        request_prompt = request_prompt[:-1] + "<think>"
+        # Debug logging
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        if hasattr(request, 'metadata'):
+            logger.debug(f"Request has metadata: {request.metadata}")
+            if request.metadata and request.metadata.get('enable_thinking', False):
+                logger.info("enable_thinking=True detected in metadata")
+                
+                # RoboBrain models need <think> appended to trigger reasoning
+                if isinstance(request_prompt, str):
+                    # Check if model name contains robobrain (case-insensitive)
+                    model_name = getattr(request, 'model', '').lower()
+                    # Also check the actual model ID from model config if available
+                    actual_model = getattr(self.model_config, 'model', '').lower() if self.model_config else ''
+                    
+                    logger.debug(f"Model from request: {model_name}")
+                    logger.debug(f"Model from config: {actual_model}")
+                    
+                    if 'robobrain' in model_name or 'robobrain' in actual_model:
+                        logger.info("RoboBrain model detected, appending <think> tag")
+                        # Remove trailing newline if present (from chat template)
+                        # RoboBrain chat template ends with "<|im_start|>assistant\n"
+                        # We need "<|im_start|>assistant<think>" (no newline)
+                        if request_prompt.endswith('\n'):
+                            request_prompt = request_prompt[:-1] + "<think>"
+                            logger.debug("Removed newline and appended <think>")
+                        else:
+                            request_prompt = request_prompt + "<think>"
+                            logger.debug("Appended <think> without newline removal")
                     else:
-                        request_prompt = request_prompt + "<think>"
-            # Note: For token list prompts (MistralTokenizer), we'd need to tokenize "<think>" and append
+                        logger.debug("Not a RoboBrain model, skipping <think> append")
+                # Note: For token list prompts (MistralTokenizer), we'd need to tokenize "<think>" and append
+        else:
+            logger.debug("Request has no metadata attribute")
 
         mm_data = await mm_data_future
 
