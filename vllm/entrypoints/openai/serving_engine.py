@@ -918,7 +918,13 @@ class OpenAIServing:
                 # Check if model name contains robobrain (case-insensitive)
                 model_name = getattr(request, 'model', '').lower()
                 if 'robobrain' in model_name:
-                    request_prompt = request_prompt + "<think>"
+                    # Remove trailing newline if present (from chat template)
+                    # RoboBrain chat template ends with "<|im_start|>assistant\n"
+                    # We need "<|im_start|>assistant<think>" (no newline)
+                    if request_prompt.endswith('\n'):
+                        request_prompt = request_prompt[:-1] + "<think>"
+                    else:
+                        request_prompt = request_prompt + "<think>"
             # Note: For token list prompts (MistralTokenizer), we'd need to tokenize "<think>" and append
 
         mm_data = await mm_data_future
