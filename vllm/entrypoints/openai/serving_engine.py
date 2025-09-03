@@ -907,6 +907,20 @@ class OpenAIServing:
                 **_chat_template_kwargs,
             )
 
+        # Append thinking tag for RoboBrain models when enable_thinking is True
+        # Check if we're using robobrain parser by checking if serving_chat has it
+        if (hasattr(request, 'metadata') and request.metadata and 
+            request.metadata.get('enable_thinking', False)):
+            # RoboBrain models need <think> appended to trigger reasoning
+            # This is a simple approach that works for RoboBrain models
+            # TODO: Make this more general or move to parser itself
+            if isinstance(request_prompt, str):
+                # Check if model name contains robobrain (case-insensitive)
+                model_name = getattr(request, 'model', '').lower()
+                if 'robobrain' in model_name:
+                    request_prompt = request_prompt + "<think>"
+            # Note: For token list prompts (MistralTokenizer), we'd need to tokenize "<think>" and append
+
         mm_data = await mm_data_future
 
         # tool parsing is done only if a tool_parser has been set and if
