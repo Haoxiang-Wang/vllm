@@ -866,56 +866,6 @@ class OpenAIServing:
                list[EngineTokensPrompt]]:
         model_config = self.model_config
 
-        # Determine enable_thinking early to allow prompt/message adjustment
-        import logging
-        logger = logging.getLogger(__name__)
-
-        enable_thinking = False
-        if hasattr(request, "metadata") and request.metadata:
-            try:
-                enable_thinking = bool(
-                    getattr(request.metadata, "get", dict().get)
-                    ("enable_thinking", False))
-            except Exception:
-                pass
-        if not enable_thinking and hasattr(request, "extra_body"):
-            extra_body = getattr(request, "extra_body", None)
-            if isinstance(extra_body, dict):
-                md = extra_body.get("metadata")
-                if isinstance(md, dict):
-                    enable_thinking = bool(md.get("enable_thinking", False))
-
-        # If thinking is enabled for RoboBrain, prefer appending <think>
-        # to the last user message BEFORE applying the chat template.
-        # This matches the known working pattern ("question<think>").
-        adj_messages = messages
-        model_name_lower = (getattr(request, "model", "") or "").lower()
-        actual_model_lower = (getattr(self.model_config, "model", "")
-                              or "").lower()
-        is_robobrain = ("robobrain" in model_name_lower
-                        or "robobrain" in actual_model_lower)
-        if enable_thinking and is_robobrain and messages:
-            try:
-                # make a shallow copy to avoid mutating caller input
-                adj_messages = list(messages)
-                last = dict(adj_messages[-1])
-                content = last.get("content")
-                if isinstance(content, str):
-                    if not content.endswith("<think>"):
-                        last["content"] = content + "<think>"
-                        adj_messages[-1] = last
-                        logger.debug("Inserted <think> into last user message")
-                elif isinstance(content, list):
-                    # Append a text part for <think>
-                    content = list(content)
-                    content.append({"type": "text", "text": "<think>"})
-                    last["content"] = content
-                    adj_messages[-1] = last
-                    logger.debug("Appended <think> content part to last message"
-                                 )
-            except Exception as e:
-                logger.debug("Could not inject <think> into messages: %s", e)
-
         resolved_content_format = resolve_chat_template_content_format(
             chat_template,
             tool_dicts,
@@ -924,7 +874,7 @@ class OpenAIServing:
             model_config=model_config,
         )
         conversation, mm_data_future = parse_chat_messages_futures(
-            adj_messages,
+            messages,
             model_config,
             tokenizer,
             content_format=resolved_content_format,
@@ -957,17 +907,42 @@ class OpenAIServing:
                 **_chat_template_kwargs,
             )
 
-        # Fallback: If previous injection didn't happen (non-string prompts),
-        # ensure <think> is appended post-template for string prompts.
-        if enable_thinking and is_robobrain and isinstance(request_prompt, str):
-            # Only append if the template did not already include <think>
-            if "<think>" not in request_prompt:
-                if request_prompt.endswith("\n"):
-                    request_prompt = request_prompt[:-1] + "<think>"
-                    logger.debug("Post-template: removed newline and appended <think>")
-                else:
-                    request_prompt = request_prompt + "<think>"
-                    logger.debug("Post-template: appended <think>")
+        # Append thinking tag for RoboBrain models when enable_thinking is True
+        # Debug logging
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        if hasattr(request, 'metadata'):
+            logger.debug(f"Request has metadata: {request.metadata}")
+            if request.metadata and request.metadata.get('enable_thinking', False):
+                logger.info("enable_thinking=True detected in metadata")
+                
+                # RoboBrain models need <think> appended to trigger reasoning
+                if isinstance(request_prompt, str):
+                    # Check if model name contains robobrain (case-insensitive)
+                    model_name = getattr(request, 'model', '').lower()
+                    # Also check the actual model ID from model config if available
+                    actual_model = getattr(self.model_config, 'model', '').lower() if self.model_config else ''
+                    
+                    logger.debug(f"Model from request: {model_name}")
+                    logger.debug(f"Model from config: {actual_model}")
+                    
+                    if 'robobrain' in model_name or 'robobrain' in actual_model:
+                        logger.info("RoboBrain model detected, appending <think> tag")
+                        # Remove trailing newline if present (from chat template)
+                        # RoboBrain chat template ends with "<|im_start|>assistant\n"
+                        # We need "<|im_start|>assistant<think>" (no newline)
+                        if request_prompt.endswith('\n'):
+                            request_prompt = request_prompt[:-1] + "<think>"
+                            logger.debug("Removed newline and appended <think>")
+                        else:
+                            request_prompt = request_prompt + "<think>"
+                            logger.debug("Appended <think> without newline removal")
+                    else:
+                        logger.debug("Not a RoboBrain model, skipping <think> append")
+                # Note: For token list prompts (MistralTokenizer), we'd need to tokenize "<think>" and append
+        else:
+            logger.debug("Request has no metadata attribute")
 
         mm_data = await mm_data_future
 

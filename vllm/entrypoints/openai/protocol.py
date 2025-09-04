@@ -435,10 +435,6 @@ class ChatCompletionRequest(OpenAIBaseModel):
     ]] = "none"
     reasoning_effort: Optional[Literal["low", "medium", "high"]] = None
     include_reasoning: bool = True
-    # Optional user-provided metadata. Useful for feature toggles or tracing.
-    # Accept arbitrary values (e.g., booleans) vs. OpenAI's string-only Metadata.
-    # Note: some OpenAI clients pass this via `extra_body`.
-    metadata: Optional[dict[str, Any]] = None
 
     # NOTE this will be ignored by vLLM -- the model determines the behavior
     parallel_tool_calls: Optional[bool] = False
